@@ -3,6 +3,7 @@ from app.memory_store import (
     add_message,
     get_messages
 )
+from app.knowledge_store import search_knowledge
 from app.llm_client import ask_llm
 
 MAX_HISTORY = 10  # 後で効いてくる
@@ -14,17 +15,48 @@ def chat(session_id: str, user_message: str):
     # ユーザー発言追加
     add_message(session_id, "user", user_message)
 
-    # 履歴制限（system + 最新N件）
+    # 履歴制限
     trimmed_messages = trim_messages(messages)
 
-    # 暫く、履歴確認用ログを残す
+    # ===== ここからRAG追加 =====
+
+    # ナレッジ検索
+    knowledge = search_knowledge(user_message)
+
+    # 元のsystem取り出し
+    base_system = trimmed_messages[0]
+
+    if knowledge:
+        context_text = "\n".join(knowledge)
+
+        merged_system = {
+            "role": "system",
+            "content": f"""
+    {base_system['content']}
+
+    以下の情報を参考に回答してください:
+    {context_text}
+    """
+        }
+    else:
+        merged_system = base_system
+
+    # system以外の履歴
+    rest_messages = trimmed_messages[1:]
+
+    # 最終メッセージ
+    rag_messages = [merged_system] + rest_messages
+
+    # ===== ここまで =====
+
+    # ログ
     print("=== BEFORE LLM ===")
-    for m in trimmed_messages:
+    for m in rag_messages:
         print(m)
     print("==================")
 
     # LLM呼び出し
-    assistant_reply = ask_llm(trimmed_messages)
+    assistant_reply = ask_llm(rag_messages)
 
     # 応答を履歴に追加
     add_message(session_id, "assistant", assistant_reply)
